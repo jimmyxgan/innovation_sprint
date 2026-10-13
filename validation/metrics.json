@@ -1,0 +1,105 @@
+{
+  "training": {
+    "samples": 387,
+    "pd": 130,
+    "interference": 257
+  },
+  "results": [
+    {
+      "scenario": "nominal",
+      "method": "Conventional",
+      "PD_recall": 1.0,
+      "false_alarms_per_sim_hour": 15000.0,
+      "TP": 2,
+      "FN": 0,
+      "FP": 2,
+      "TN": 0,
+      "localization_correct_per_pd": 0.5,
+      "localization_resolved_per_pd": 0.5
+    },
+    {
+      "scenario": "nominal",
+      "method": "Conventional + RF",
+      "PD_recall": 0.5,
+      "false_alarms_per_sim_hour": 0.0,
+      "TP": 1,
+      "FN": 1,
+      "FP": 0,
+      "TN": 2,
+      "localization_correct_per_pd": 0.0,
+      "localization_resolved_per_pd": 0.5
+    },
+    {
+      "scenario": "high_noise",
+      "method": "Conventional",
+      "PD_recall": 1.0,
+      "false_alarms_per_sim_hour": 15000.0,
+      "TP": 2,
+      "FN": 0,
+      "FP": 2,
+      "TN": 0,
+      "localization_correct_per_pd": 0.5,
+      "localization_resolved_per_pd": 1.0
+    },
+    {
+      "scenario": "high_noise",
+      "method": "Conventional + RF",
+      "PD_recall": 0.0,
+      "false_alarms_per_sim_hour": 0.0,
+      "TP": 0,
+      "FN": 2,
+      "FP": 0,
+      "TN": 2,
+      "localization_correct_per_pd": 1.0,
+      "localization_resolved_per_pd": 1.0
+    },
+    {
+      "scenario": "sensor_shift",
+      "method": "Conventional",
+      "PD_recall": 1.0,
+      "false_alarms_per_sim_hour": 15000.0,
+      "TP": 2,
+      "FN": 0,
+      "FP": 2,
+      "TN": 0,
+      "localization_correct_per_pd": 0.0,
+      "localization_resolved_per_pd": 0.5
+    },
+    {
+      "scenario": "sensor_shift",
+      "method": "Conventional + RF",
+      "PD_recall": 0.0,
+      "false_alarms_per_sim_hour": 0.0,
+      "TP": 0,
+      "FN": 2,
+      "FP": 0,
+      "TN": 2,
+      "localization_correct_per_pd": 0.5,
+      "localization_resolved_per_pd": 1.0
+    },
+    {
+      "scenario": "spectral_shift",
+      "method": "Conventional",
+      "PD_recall": 1.0,
+      "false_alarms_per_sim_hour": 15000.0,
+      "TP": 2,
+      "FN": 0,
+      "FP": 2,
+      "TN": 0,
+      "localization_correct_per_pd": 1.0,
+      "localization_resolved_per_pd": 1.0
+    },
+    {
+      "scenario": "spectral_shift",
+      "method": "Conventional + RF",
+      "PD_recall": 0.0,
+      "false_alarms_per_sim_hour": 0.0,
+      "TP": 0,
+      "FN": 2,
+      "FP": 0,
+      "TN": 2,
+      "localization_correct_per_pd": 0.0,
+      "localization_resolved_per_pd": 0.0
+    }
+  ]
+}

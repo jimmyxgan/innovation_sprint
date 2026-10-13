@@ -1,0 +1,9 @@
+scenario,method,PD_recall,false_alarms_per_sim_hour,TP,FN,FP,TN,localization_correct_per_pd,localization_resolved_per_pd
+nominal,Conventional,1.0,15000.0,2,0,2,0,0.5,0.5
+nominal,Conventional + RF,0.5,0.0,1,1,0,2,0.0,0.5
+high_noise,Conventional,1.0,15000.0,2,0,2,0,0.5,1.0
+high_noise,Conventional + RF,0.0,0.0,0,2,0,2,1.0,1.0
+sensor_shift,Conventional,1.0,15000.0,2,0,2,0,0.0,0.5
+sensor_shift,Conventional + RF,0.0,0.0,0,2,0,2,0.5,1.0
+spectral_shift,Conventional,1.0,15000.0,2,0,2,0,1.0,1.0
+spectral_shift,Conventional + RF,0.0,0.0,0,2,0,2,0.0,0.0

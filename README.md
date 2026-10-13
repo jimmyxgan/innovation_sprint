@@ -1,55 +1,57 @@
-# Winding-Resolved PD Condition Monitor — Prototype
+# PD Monitor v3 — reliability-focused Python readout prototype
 
-**Demonstration only.** This software generates synthetic acoustic/UV observations, not real partial-discharge measurements. The ring-response matrix, sensor positions, UV detections, timestamps and classifier training are illustrative. It has **not** been calibrated to a reactor, independently validated or certified to any IEC standard.
+**Not certified; synthetic data; no measured reactor acoustic transfer function.**
 
-## Run
+This is a replacement for the v2 demo. It keeps the 16:9 HMI and 16 acoustic nodes, but separates physics (`physics.py`), signal processing (`processing.py`), application/storage (`app.py`), synthetic benchmark (`validate.py`) and offline delivery test (`outbox_demo.py`).
 
-```bash
-python -m pip install -r requirements.txt
-python app.py
-```
-
-Open **http://127.0.0.1:8765/dashboard.html** in a browser. Press **F11** for a full-screen 16:9 presentation. The layout is optimized for 1920×1080 and scales proportionally. Stop the server with Ctrl+C.
-
-To generate an SQLite dataset without launching the server:
+## Remote Linux + VS Code
 
 ```bash
-python app.py --seed-only
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py --port 8765
 ```
 
-## What is implemented
+In VS Code Remote SSH, forward port 8765 in the **Ports** panel. Open `http://localhost:8765/`. Server binds to localhost only.
 
-- Four synthetic acoustic channels, nominal 100 kHz sample rate, stochastic PD-like/impact signals and reactor vibration.
-- SciPy bandpass filtering, Hilbert envelope, robust adaptive threshold and candidate-event detection.
-- Physics-inspired time/frequency feature extraction and a scikit-learn Random Forest trained on **synthetic** waveforms.
-- Three event labels: PD-like, interference-like, uncertain; all candidate records retained.
-- Illustrative ring inference from an **arbitrary** amplitude-response matrix. Low-confidence and single-sensor events receive an unresolved location.
-- Synthetic UV observations as auxiliary evidence. **No camera image processing or physical UV camera integration is implemented.**
-- SQLite event records including timestamps, sensor ID, amplitude, dominant frequency, SNR, ML score, estimated ring, confidence, UV flag, and downsampled waveform snippet.
-- Live HTTP/JSON endpoint and a responsive fixed-aspect-ratio browser HMI, including clickable reactor windings, trend charts, and an event log.
+### Benchmarks
 
-## Important engineering limitations
+```bash
+python validate.py --samples 12
+# creates validation/metrics.csv, metrics.json, pd_recall.png, false_alarms.png
+python app.py --no-ml --seed-only  # conventional detector fallback
+python outbox_demo.py              # offline: pending events remain queued
+python outbox_demo.py --connected  # MOCK station acknowledgement only
+```
 
-1. The classifier has **no field-validated accuracy**. Do not use its synthetic-data score as an actual PD probability.
-2. The arbitrary acoustic gain matrix cannot establish ring-level localization. Proper localization requires approved sensor placement, propagation measurements, synchronized acquisition and validation with seeded defects.
-3. The timestamps use the host UTC clock, labeled `SIMULATED_SYNC`; there is no hardware PTP implementation.
-4. The built-in HTTP server binds to **127.0.0.1 only** and is **not a secure station gateway**. It must not be exposed to a network. There is no IEC 61850, TLS/mTLS, certificate management or COMTRADE implementation in this prototype.
-5. The UV flags are synthetic and are not derived from UV frames. No claim of internal-PD UV visibility is made.
-6. Historical charts are rolling **10-second demo bins**, not events/hour or true aging trends. They illustrate the interface, not a calibrated deterioration assessment.
-7. Acoustic amplitude is an arbitrary filtered receiver unit, not IEC 60270 apparent charge (pC).
+**Interpretation warning:** `false_alarms_per_sim_hour` is based on accelerated, densely injected synthetic test events. It is NOT a realistic expected substation false alarm rate. The RF can perform worse under unseen spectral/sensor changes. Keep all candidate events and avoid safety claims. The model does not generate UV detections until a real UV input interface is provided.
 
-## Production path / standards traceability
+### COMSOL interface
 
-- **PD measurement:** qualify acoustic sensor/interrogator and UV camera sensitivity, bandwidth, calibration and interference rejection, guided by IEC TS 62478 and relevant IEC 60270 principles.
-- **Sensor deployment:** approved rim locations only; avoid cooling gaps; document electrical clearance, temperature, surge and EMC compatibility.
-- **Security:** implement station-approved IEC 62351-compatible authenticated encrypted transport, role-based access, certificate/key lifecycle, buffering, and IEC 62443 security requirements.
-- **Time:** acquisition-side timestamping using qualified IEC/IEEE 61850-9-3 station synchronization and explicit time-quality metadata.
-- **Interoperability:** implement and test an IEC 61850 data model/gateway and, where appropriate, IEC 60255-24 COMTRADE exports.
-- **EMC:** select and qualify equipment for applicable IEC 61000-6-5 requirements.
-- **Validation:** independent ground-truth data, detection probability versus SNR, false alarms/hour, blind scenario holdout, localization confusion matrix, loss-of-sensor/clock/network tests, and uncertainty thresholds.
+```python
+import numpy as np
+from physics import SENSORS, FS
+# signals shape (16, N>=512), channels in SENSORS order; units: volts at ADC
+np.savez('comsol_sensors.npz', signals=signals, fs=FS, sensor_ids=np.array(SENSORS))
+```
 
-## Files
+Then run `python app.py --comsol-npz comsol_sensors.npz` to replay that fixed window. Data must already include the propagation and sensor transfer function (or measured sensor response). For other sample rates, perform calibrated anti-aliased resampling before import.
 
-- `app.py` — synthetic acquisition, signal processing, classifier, ring estimation, database, and local HTTP server.
-- `dashboard.html` — standalone browser HMI, populated from `/api/status`.
-- `monitor.sqlite3` — generated event database after running the application.
+### API
+
+- `/api/status` event-level recent log, hourly rates, status, station requirements
+- `/api/hourly` historical aggregate
+- `/api/waveform` latest event snippets (JSON, demonstration only)
+
+**Event model:** 1 row per multi-sensor cluster; includes event UID, timestamp, source, sequence, time quality, classification, gap, sector, response similarity margin (not probability), amplitudes and detection flags. SQLite outbox is transactionally written but the delivery script simulates acknowledgement; it does not transmit over TLS.
+
+### Literature and standards
+
+- IEC TS 62478:2016, *Measurement of partial discharges by electromagnetic and acoustic methods*, https://webstore.iec.ch/en/publication/25740 . Supports acoustic PD detection, sensor response/sensitivity checks and localization considerations; does NOT specify our numerical signal parameters.
+- IEC 60255-24:2013 / IEEE C37.111-2013 COMTRADE, https://www.theiteh.com/catalog/standards/iec/feae48a4-c2ca-4739-8f51-8b4e7785ca25/iec-60255-24-2013 . Standard for transient waveform export; not implemented here.
+- Breiman (2001), *Random Forests*, https://doi.org/10.1023/A:1010933404324 . Basis of RF model.
+- Hampel (1974), *The Influence Curve and Its Role in Robust Estimation*, JASA 69:383–393. Robust-statistics motivation for median/MAD.
+- Trench Innovation Sprint 2026 Track B problem statement, pp. 4, 10–12, user-provided.
+
+Every synthetic source characteristic, attenuation equation, transfer response and detection threshold is tagged `[ASSUMPTION]` in code. None are represented as experimentally established reactor values. See `STANDARDS_MATRIX.md` for the implementation versus specification boundary.
