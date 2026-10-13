@@ -28,14 +28,14 @@ def extract_features(w):
     return [float(peak),float(rms),float(peak/rms),float(mask.sum()/FS),rise,
             c,bw,float(-(power*np.log(power+1e-15)).sum()),float(power[freq>20e3].sum())]
 
-def detect(x,noise_multiplier=8.0):
+def detect(x,noise_multiplier=10.0):
     # [IEC62478] frequency filtering and pulse detection are compatible with acoustic methods;
     # [ASSUMPTION] 4th order, 14-43 kHz band and threshold coefficients are design choices.
     y=sosfiltfilt(SOS,x); env=np.abs(hilbert(y))
     quiet=env[env<=np.quantile(env,.65)]
     med=np.median(quiet); mad=np.median(np.abs(quiet-med))
     # [ROBUST] 1.4826*MAD estimates Gaussian sigma; [ASSUMPTION] k=8, floor=.025 V.
-    threshold=max(float(med+noise_multiplier*1.4826*mad),.025)
+    threshold=max(float(med+noise_multiplier*1.4826*mad),.040)
     peaks,_=find_peaks(env,height=threshold,distance=int(.003*FS),prominence=.5*threshold)
     return y,env,threshold,peaks
 
@@ -68,10 +68,11 @@ def train_rf(seed=42,scenario='nominal',examples_per_class=220):
     clf.fit(X,Y)
     return clf,{'samples':len(Y),'pd':sum(Y),'interference':len(Y)-sum(Y)}
 
-def observations(x,clf=None):
-    obs=[]
+def observations(x,clf=None,return_envelopes=False):
+    obs=[];spatial_env=[]
     for i in range(x.shape[0]):
         y,env,th,peaks=detect(x[i])
+        spatial_env.append((env,th))
         for p in peaks:
             lo=int(p)-110
             if lo<0 or lo+512>len(y):continue
@@ -79,12 +80,13 @@ def observations(x,clf=None):
             score=float(clf.predict_proba([feat])[0,1]) if clf is not None else None
             obs.append({'sample':int(p),'sensor_index':i,'amplitude':feat[0],
                         'pd_score':score,'waveform':w})
-    return obs
+    return (obs,spatial_env) if return_envelopes else obs
 
-def fuse(obs,tolerance_samples=130):
+def fuse(obs,tolerance_samples=130, spatial_env=None):
     """[ASSUMPTION] 1.3 ms coincidence grouping; must be replaced by calibrated
     maximum acoustic travel-time and verified for multiple simultaneous sources.
     """
+    # Filter each sensor once per acquisition window, not once per event.
     clusters=[]
     for o in sorted(obs,key=lambda a:a['sample']):
         if not clusters or o['sample']-clusters[-1][-1]['sample']>tolerance_samples:
@@ -97,7 +99,30 @@ def fuse(obs,tolerance_samples=130):
             i=o['sensor_index']
             if i not in by or o['amplitude']>by[i]['amplitude']:by[i]=o
         amps=np.array([by[i]['amplitude'] if i in by else 0 for i in range(16)])
-        scores=[o['pd_score'] for o in by.values() if o['pd_score'] is not None]
+        # Subthreshold spatial evidence: a conventional event may be detected by
+        # only 1-2 sensors, while weaker synchronized arrivals are still present.
+        # Use a short envelope search near the cluster time on EVERY channel.
+        # [ASSUMPTION] 0.7 ms lag window and 3.5 sigma envelope evidence floor;
+        # travel-time window requires COMSOL/field calibration, IEC TS 62478.
+        evidence=np.zeros(16)
+        if spatial_env is not None:
+            center=int(np.median([o['sample'] for o in by.values()]))
+            for i in range(16):
+                env,threshold=spatial_env[i]
+                lo=max(0,center-45);hi=min(len(env),center+95)
+                if hi<=lo:continue
+                # Threshold includes 8*MAD and a floor. For a conservative
+                # subthreshold evidence estimate, require 0.44*threshold.
+                peak=float(np.max(env[lo:hi]))
+                if peak>max(.012,.44*threshold): evidence[i]=peak
+            # The spatial estimator can use subthreshold amplitudes, but the
+            # detection list and event count still use actual threshold crossings.
+            amps=np.maximum(amps,evidence)
+        # Only the highest-SNR sensors vote on classification. Faint arrivals
+        # are used for localization, but their near-noise features should not
+        # swamp a clear source waveform. [ASSUMPTION] top 4 channel votes.
+        strongest=sorted(by.values(),key=lambda o:o['amplitude'],reverse=True)[:4]
+        scores=[o['pd_score'] for o in strongest if o['pd_score'] is not None]
         score=float(np.median(scores)) if scores else None
         cls=('Candidate / no ML' if score is None else
              'PD-like' if score>=.75 else 'Interference-like' if score<=.25 else 'Uncertain')
@@ -106,12 +131,12 @@ def fuse(obs,tolerance_samples=130):
                     'classification':cls,'pd_score':score,'gap':g,'sector':s,
                     'location_score':margin,'amplitudes':amps.tolist(),
                     'detected':[i in by for i in range(16)],'sensor_count':len(by),
-                    'peak':float(max(amps)), 'waveforms':{i:o['waveform'] for i,o in by.items()}})
+                    'peak':float(max(amps)), 'evidence_count':int(np.count_nonzero(evidence)), 'waveforms':{i:o['waveform'] for i,o in by.items()}})
     return out
 
 def localize(amps):
     amps=np.asarray(amps,float)
-    if np.count_nonzero(amps)<3 or np.linalg.norm(amps)==0:return None,None,0.
+    if np.count_nonzero(amps)<4 or np.linalg.norm(amps)==0:return None,None,0.
     scores=[]
     for g in range(4):
         for s in range(4):
@@ -119,5 +144,5 @@ def localize(amps):
             scores.append(float(np.dot(amps,expected)/(np.linalg.norm(amps)*np.linalg.norm(expected))))
     ranking=np.argsort(scores);best=int(ranking[-1]);runner=int(ranking[-2]);margin=scores[best]-scores[runner]
     # [ASSUMPTION] .72 cosine score and .005 margin are NOT confidence probabilities.
-    if scores[best]<.72 or margin<.005:return None,None,float(max(0,margin))
+    if scores[best]<.78 or margin<.008:return None,None,float(max(0,margin))
     return best//4+1,best%4+1,float(margin)

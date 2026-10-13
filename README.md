@@ -1,57 +1,49 @@
-# PD Monitor v3 — reliability-focused Python readout prototype
+# PD Monitor v6 — Presentation Demo
 
-**Not certified; synthetic data; no measured reactor acoustic transfer function.**
+This is a **synthetic demonstration**, not a field-qualified partial-discharge detector or a secure IEC 61850 station endpoint. The physical propagation and PD pulse parameters in `physics.py` are illustrative assumptions; consult `STANDARDS_MATRIX.md` for the proposed deployment architecture.
 
-This is a replacement for the v2 demo. It keeps the 16:9 HMI and 16 acoustic nodes, but separates physics (`physics.py`), signal processing (`processing.py`), application/storage (`app.py`), synthetic benchmark (`validate.py`) and offline delivery test (`outbox_demo.py`).
-
-## Remote Linux + VS Code
+## Start (recommended for the PowerPoint screenshot / video)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
-python app.py --port 8765
+python app.py --demo --reset-demo-db --port 8765
 ```
 
-In VS Code Remote SSH, forward port 8765 in the **Ports** panel. Open `http://localhost:8765/`. Server binds to localhost only.
+Open `http://localhost:8765` (forward TCP 8765 in VS Code Remote SSH). The browser canvas stays 1920×1080 and letterboxes at other aspect ratios. The demo auto-generates **scripted, illustrative seven-day daily totals** and updates the live detector about every 0.65 seconds (processing time may add latency). The event log and latest PD-like waveform change as new events arrive. The seven-day line is daily history: it is **not** expected to shift appreciably every second.
 
-### Benchmarks
+**`--reset-demo-db` deletes this package's `monitor_v3.sqlite3` database.** Back it up first if you want to retain previous events. Use it when upgrading from v5 to prevent old accumulated synthetic events from crowding the log. After first run, omit `--reset-demo-db` to retain records.
+
+Alternative:
 
 ```bash
-python validate.py --samples 12
-# creates validation/metrics.csv, metrics.json, pd_recall.png, false_alarms.png
-python app.py --no-ml --seed-only  # conventional detector fallback
-python outbox_demo.py              # offline: pending events remain queued
-python outbox_demo.py --connected  # MOCK station acknowledgement only
+python app.py --demo --port 8765
+python app.py --port 8765                 # slower, without scripted baseline
+python app.py --demo --period 1.0 --port 8765
+python test_trends.py
+python validate.py
 ```
 
-**Interpretation warning:** `false_alarms_per_sim_hour` is based on accelerated, densely injected synthetic test events. It is NOT a realistic expected substation false alarm rate. The RF can perform worse under unseen spectral/sensor changes. Keep all candidate events and avoid safety claims. The model does not generate UV detections until a real UV input interface is provided.
+`--seed-history` is a backwards-compatible alias for inserting the scripted baseline. `--no-ml` disables RF, preserving conventional detection; in that mode PD-like waveforms are not produced because no RF classification exists.
 
-### COMSOL interface
+## What is simulated vs processed?
 
-```python
-import numpy as np
-from physics import SENSORS, FS
-# signals shape (16, N>=512), channels in SENSORS order; units: volts at ADC
-np.savez('comsol_sensors.npz', signals=signals, fs=FS, sensor_ids=np.array(SENSORS))
-```
+- **Scripted 7-day history**: seven explicit, synthetic daily totals for PD-like and all candidate events, assuming 24 h/day exposure; **not produced by the detector**. This is marked `SCRIPTED DEMO HISTORY` in the dashboard. The historical baseline is the mean of the first four completed days, the comparison is the next two completed days; today is shown but excluded from the comparison. Thresholds (2× WATCH, 3× WARNING) are *illustrative, not IEC limits*.
+- **Live events**: generated through `make_window → detect → Random Forest → fuse → SQLite`, with event-level counts. `--demo` raises the synthetic injection rate and shortens the wall-clock wait, but does not claim a real-world PD occurrence rate.
+- **Waveform**: the filtered 512-sample capture from the **strongest responding acoustic sensor** for the same latest PD-like event shown on the reactor map. The panel names the sensor (e.g. `AE-G4-S2`) prominently. Amplitude is in *uncalibrated relative units*, not pC.
+- **Baseline reference line**: dashed orange at the average PD-like events per assumed monitoring hour from the first four historical days. The blue line shows each day's scripted PD-like events per assumed monitoring hour. Actual field rates require measured uptime and validated detector calibration.
+- **Uncertain/unlocalized events**: preserved, not forced into a PD category or sector. UV channels remain placeholders with no fabricated corroboration.
 
-Then run `python app.py --comsol-npz comsol_sensors.npz` to replay that fixed window. Data must already include the propagation and sensor transfer function (or measured sensor response). For other sample rates, perform calibrated anti-aliased resampling before import.
+## Engineering limitations
 
-### API
+This Python prototype uses local HTTP, synthetic UTC quality, a toy acoustic attenuation model and a volatile waveform cache. It does **not** implement PTP time synchronization, IEC 61850, COMTRADE, mTLS, EMC qualification or field calibration. Refer to `STANDARDS_MATRIX.md` for the qualitative architecture and open qualification work.
 
-- `/api/status` event-level recent log, hourly rates, status, station requirements
-- `/api/hourly` historical aggregate
-- `/api/waveform` latest event snippets (JSON, demonstration only)
-
-**Event model:** 1 row per multi-sensor cluster; includes event UID, timestamp, source, sequence, time quality, classification, gap, sector, response similarity margin (not probability), amplitudes and detection flags. SQLite outbox is transactionally written but the delivery script simulates acknowledgement; it does not transmit over TLS.
-
-### Literature and standards
-
-- IEC TS 62478:2016, *Measurement of partial discharges by electromagnetic and acoustic methods*, https://webstore.iec.ch/en/publication/25740 . Supports acoustic PD detection, sensor response/sensitivity checks and localization considerations; does NOT specify our numerical signal parameters.
-- IEC 60255-24:2013 / IEEE C37.111-2013 COMTRADE, https://www.theiteh.com/catalog/standards/iec/feae48a4-c2ca-4739-8f51-8b4e7785ca25/iec-60255-24-2013 . Standard for transient waveform export; not implemented here.
-- Breiman (2001), *Random Forests*, https://doi.org/10.1023/A:1010933404324 . Basis of RF model.
-- Hampel (1974), *The Influence Curve and Its Role in Robust Estimation*, JASA 69:383–393. Robust-statistics motivation for median/MAD.
-- Trench Innovation Sprint 2026 Track B problem statement, pp. 4, 10–12, user-provided.
-
-Every synthetic source characteristic, attenuation equation, transfer response and detection threshold is tagged `[ASSUMPTION]` in code. None are represented as experimentally established reactor values. See `STANDARDS_MATRIX.md` for the implementation versus specification boundary.
+## Version 7 presentation cadence
+Launch with `python app.py --demo --reset-demo-db --port 8765`.
+The application seeds an explicitly illustrative seven-day baseline, then injects
+**one synthetic PD source approximately every 3 seconds** into each 0.24 s
+16-channel acquisition window. RF classification remains independent: an injected
+PD may be marked uncertain or interference-like. No labels are overridden.
+The `--period 5` option changes the acquisition cadence to about 5 seconds.
+Processing time adds to the interval. `--reset-demo-db` deletes local demo data.
+The seven-day scripted trend remains independent of live events and represents
+an illustrative elevated-condition history, not seven days of measurement.
