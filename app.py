@@ -14,8 +14,9 @@ from urllib.parse import urlparse
 import numpy as np
 from physics import FS,SENSORS,make_window
 from processing import train_rf,observations,fuse
+from integrated_pipeline import train_models,make_dual_window,process_dual,CHANNELS,MIC_IDS,AE_IDS
 ROOT=Path(__file__).resolve().parent
-DB=ROOT/'monitor.sqlite3'
+DB=ROOT/'monitor_v3.sqlite3'
 LATEST_WAVE={}
 WAVE_CACHE={}
 LOCK=threading.Lock()
@@ -34,6 +35,8 @@ def init_db():
         db.execute('''CREATE TABLE IF NOT EXISTS demo_daily (
             day TEXT PRIMARY KEY, pd INTEGER NOT NULL, candidates INTEGER NOT NULL,
             monitoring_hours REAL NOT NULL, provenance TEXT NOT NULL)''')
+        cols={r[1] for r in db.execute('PRAGMA table_info(events)')}
+        if 'evidence_json' not in cols:db.execute('ALTER TABLE events ADD COLUMN evidence_json TEXT')
         db.commit()
 
 def add_event(row):
@@ -45,12 +48,12 @@ def add_event(row):
         db.execute('PRAGMA journal_mode=WAL')
         db.execute('''INSERT OR IGNORE INTO events(event_uid,timestamp,classification,pd_score,
         gap,sector,location_score,uv_inner,uv_outer,peak,sensor_count,
-        amplitudes_json,detected_json,time_quality,synthetic,source,sequence)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        amplitudes_json,detected_json,time_quality,synthetic,source,sequence,evidence_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (row['event_uid'],row['timestamp'],row['classification'],row['pd_score'],
         row['gap'],row['sector'],row['location_score'],row['uv_inner'],row['uv_outer'],
         row['peak'],row['sensor_count'],json.dumps(row['amplitudes']),
-        json.dumps(row['detected']),row['time_quality'],1,row['source'],row['sequence']))
+        json.dumps(row['detected']),row['time_quality'],1,row['source'],row['sequence'],json.dumps(row.get('evidence',{}))))
         # Accelerated replay is not telemetry and must not enter the delivery queue.
         if row['source']!='synthetic_history':
             db.execute('INSERT OR IGNORE INTO outbox(event_uid,payload_json) VALUES (?,?)',
@@ -84,6 +87,15 @@ def process(x,clf,base_time,sequence,truth=None,source='synthetic'):
             for uid in list(WAVE_CACHE)[:-120]:WAVE_CACHE.pop(uid,None)
     return len(clusters)
 
+def process_integrated(signals,bundles,base_time,sequence,source='synthetic'):
+    events,captures=process_dual(signals,bundles,base_time,sequence,source)
+    for e in events:add_event(e)
+    with LOCK:
+        WAVE_CACHE.update(captures)
+        if len(WAVE_CACHE)>120:
+            for uid in list(WAVE_CACHE)[:-120]:WAVE_CACHE.pop(uid,None)
+    return len(events)
+
 def load_comsol_npz(path):
     """Interface for COMSOL/team simulation output.
     NPZ keys: signals (16,n_samples), fs (100000), optional sensor_ids.
@@ -97,13 +109,17 @@ def load_comsol_npz(path):
         raise ValueError('sensor_ids order does not match SENSORS')
     return x
 
-def generator(stop,clf,period,scenario,comsol=None,demo=False):
+def generator(stop,clf,period,scenario,comsol=None,demo=False,integrated=True):
     rng=np.random.default_rng(20261013);sequence=int(time.time());step=0
     while not stop.is_set():
         # DEMO POLICY [ASSUMPTION]: one injected PD source per acquisition cycle,
         # every ~3 seconds. This is a scripted presentation cadence, NOT an
         # experimentally established PD occurrence rate. The detector and RF
         # still determine how many observations/events are actually reported.
+        if integrated and comsol is None:
+            signals,_=make_dual_window(rng,scenario,.65,demo)
+            process_integrated(signals,clf,datetime.now(timezone.utc),sequence)
+            sequence+=1;step+=1;stop.wait(period);continue
         x=(load_comsol_npz(comsol) if comsol else
            make_window(rng,scenario,.65,force_kind='pd')[0] if demo else
            make_window(rng,scenario,min(step/100,1))[0])
@@ -126,6 +142,12 @@ def daily_condition(db, now):
         rows=db.execute('SELECT day,pd,candidates,monitoring_hours FROM demo_daily WHERE day>=? AND day<=?',
                         (first.isoformat(),end.isoformat())).fetchall()
         lookup={r['day']:dict(r) for r in rows}
+        # Live demonstration overlay: events recorded today are added to the seeded
+        # fixture's current-day count. Both provenance and assumed exposure remain explicit.
+        live=db.execute("SELECT COUNT(*) AS candidates, SUM(CASE WHEN classification='PD-like' THEN 1 ELSE 0 END) AS pd FROM events WHERE substr(timestamp,1,10)=? AND source!='synthetic_history'",(end.isoformat(),)).fetchone()
+        if end.isoformat() in lookup:
+            lookup[end.isoformat()]['pd']+=int(live['pd'] or 0)
+            lookup[end.isoformat()]['candidates']+=int(live['candidates'] or 0)
     else:
         rows=db.execute("""SELECT substr(timestamp,1,10) AS day,
             COUNT(*) AS candidates,
@@ -164,7 +186,7 @@ def daily_condition(db, now):
     }[state]
     return {'days':days,'baseline_pd_per_hour_illustrative':base,
             'ratio':ratio,'state':state,'advisory':action,
-            'provenance':'SCRIPTED DEMO HISTORY (not measured or RF classified)' if demo else 'OBSERVED EVENTS (exposure unknown)',
+            'provenance':'SCRIPTED DEMO HISTORY + LIVE SIMULATED EVENTS (24 h assumed exposure)' if demo else 'OBSERVED EVENTS (exposure unknown)',
             'basis':'Illustrative 4-day reference / 2-day comparison; thresholds not field alarms',
             'day_coverage':'Demo history assumes 24 monitoring hours/day; not actual acquisition uptime.' if demo else 'Uptime unavailable: observed rates not validated.'}
 
@@ -223,6 +245,7 @@ def status():
     for r in recent:
         r['amplitudes']=json.loads(r.pop('amplitudes_json'))
         r['detected']=json.loads(r.pop('detected_json'))
+        r['evidence']=json.loads(r.pop('evidence_json') or '{}')
     # The waveform and sensor map MUST refer to the same most recent PD-like event.
     latest=next((r for r in recent if r['classification']=='PD-like'),None)
     if latest is None:latest=next((r for r in recent if r['classification']=='Uncertain'),None)
@@ -230,8 +253,8 @@ def status():
     state=condition['state']
     advisory=f"{condition['advisory']} Demo thresholds; not a field alarm."
     return {'synthetic':True,'generated_utc':now.isoformat(),'time_quality':'SIMULATED_CLOCK',
-            'sensors':SENSORS,'uv_sensors':['UV-INNER','UV-OUTER'],
-            'latest':latest,'events':recent[:60],'trends':trends,'regions':regions,'score_diagnostics':{'bins':['0-.25','.25-.40','.40-.60','.60-.75','.75-1'],'counts':score_hist,'n':len(scores)},
+            'sensors':AE_IDS,'microphones':MIC_IDS,'array_geometry':{'azimuths':8,'ae_levels':5,'mic_levels':2,'surfaces':['IN','OUT']},'pipeline':'dual-modality RF + physical diagnostics (synthetic)','uv_sensors':['UV-INNER','UV-OUTER'],
+            'latest':latest,'events':[e for e in recent if e['classification']=='PD-like'][:25],'trends':trends,'regions':regions,'score_diagnostics':{'bins':['0-.25','.25-.40','.40-.60','.60-.75','.75-1'],'counts':score_hist,'n':len(scores)},
             'hourly':[dict(r) for r in reversed(hourly)],'condition':condition,
             'stats':{'events':n_c,'pd':n_pd,'uncertain':int(rates['uncertain'] or 0)},
             'network_status':f'LOCAL HTTP · {queue} PENDING',
@@ -270,12 +293,14 @@ def main():
     p.add_argument('--comsol-npz',type=Path,default=None)
     p.add_argument('--seed-only',action='store_true')
     p.add_argument('--seed-history',action='store_true',help='Insert clearly labeled synthetic 7-day demo history once')
+    p.add_argument('--legacy',action='store_true',help='Use original AE-only pipeline')
     p.add_argument('--no-ml',action='store_true',help='Run conventional detection only')
     args=p.parse_args()
     if args.reset_demo_db and DB.exists(): DB.unlink()
     if args.period is None:args.period=3.0 if args.demo else 2.5
     init_db()
-    clf=None if args.no_ml else train_rf()[0]
+    integrated=not args.legacy and args.comsol_npz is None
+    clf=(None if args.no_ml else train_models()) if integrated else (None if args.no_ml else train_rf()[0])
     if args.demo or args.seed_history:
         print('Seeded SCRIPTED illustrative daily baseline:',seed_demo_baseline(),'days',flush=True)
     # --seed-history remains an alias for demo history for backward compatibility.
@@ -283,11 +308,14 @@ def main():
     if not args.demo:
         for k in range(3):
             x=load_comsol_npz(args.comsol_npz) if args.comsol_npz else make_window(rng,args.scenario,.25*k)[0]
-            process(x,clf,datetime.now(timezone.utc),int(time.time())+k)
+            if integrated:
+                signals,_=make_dual_window(rng,args.scenario,.25*k)
+                process_integrated(signals,clf,datetime.now(timezone.utc),int(time.time())+k)
+            else:process(x,clf,datetime.now(timezone.utc),int(time.time())+k)
     # Demo skips startup burst: the first controlled PD arrives in the generator.
     if args.seed_only:print('Seeded',DB);return
     stop=threading.Event()
-    th=threading.Thread(target=generator,args=(stop,clf,args.period,args.scenario,args.comsol_npz,args.demo),daemon=True)
+    th=threading.Thread(target=generator,args=(stop,clf,args.period,args.scenario,args.comsol_npz,args.demo,integrated),daemon=True)
     th.start();srv=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
     print(f'Open http://localhost:{args.port}/ via VS Code Ports forwarding',flush=True)
     try:srv.serve_forever()

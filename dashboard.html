@@ -26,9 +26,9 @@ html,body{width:100%;height:100%;overflow:hidden}
 .wave-panel{height:115px;background:#0a1a29;border:1px solid #29465c;border-radius:6px;overflow:hidden}
 .wave-panel svg{width:100%;height:100%;display:block}
 
-</style></head><body><div id="viewport"><main class="shell"><header class="header"><div><div class="brand">AIR-CORE REACTOR <span style="color:#55bbeb">/ PD CONDITION MONITOR</span></div><div class="sub">16-channel acoustic array · 2 UV optical channels · winding-resolved monitoring concept</div></div><div class="right"><span class="pill amber">SYNTHETIC DEMO</span><span class="pill" id="clock">SIMULATED CLOCK</span><span class="pill" id="network">LOCAL DEMO</span></div></header>
-<section class="grid"><article class="panel map-panel"><div class="title">Concentric winding / acoustic response map</div><div class="mapwrap"><svg id="reactor" viewBox="0 0 500 500" aria-label="Four concentric air gaps, 16 acoustic sensors and highlighted PD sector"></svg></div><div class="legend"><span><i class="dot" style="background:#49b8ee"></i>Low acoustic amplitude</span><span><i class="dot" style="background:#f7ba5d"></i>High amplitude</span><span><i class="dot" style="background:#d4743c"></i>Suspected sector</span></div><div class="mini" style="margin-top:9px">Sectors S1–S4 are 90° wedges. G1 = innermost air gap; G4 = outermost.</div></article>
-<article class="panel"><div class="title">Latest event / condition assessment</div><div class="metric"><div class="small">Most recent PD-like event</div><div class="value" id="location">WAITING</div><div class="mini" id="confidence">Localization is illustrative; uncertainty is retained</div></div><div class="bottom"><div class="metric"><div class="small">PD-like events (recent)</div><div class="value" id="pdcount">—</div></div><div class="metric"><div class="small">Uncertain events</div><div class="value" id="uncount">—</div></div></div><div class="title" style="margin-top:8px">UV surface channels</div><div class="uv idle" id="uvinner">● UV-INNER — no coincident emission</div><div class="uv idle" id="uvouter">● UV-OUTER — no coincident emission</div><div class="title" style="margin-top:19px">Seven-day PD activity trend</div>
+</style></head><body><div id="viewport"><main class="shell"><header class="header"><div><div class="brand">AIR-CORE REACTOR <span style="color:#55bbeb">/ PD CONDITION MONITOR</span></div><div class="sub">96-channel acoustic array (80 surface AE + 16 rim microphones) · synthetic concept</div></div><div class="right"><span class="pill amber">SYNTHETIC DEMO</span><span class="pill" id="clock">SIMULATED CLOCK</span><span class="pill" id="network">LOCAL DEMO</span></div></header>
+<section class="grid"><article class="panel map-panel"><div class="title">Isometric sensor response · ID / OD / rim</div><div class="mapwrap"><svg id="reactor" viewBox="0 0 500 500" aria-label="Translucent short hollow reactor cylinder, five ID and OD sensor rings and two microphone rim rings"></svg></div><div class="legend"><span><i class="dot" style="background:#f7ba5d"></i>AE (round)</span><span><i class="dot" style="background:#62d9f4;border-radius:2px"></i>Microphone (square)</span><span><i class="dot" style="background:#ff695c"></i>Excited sensor</span></div><div class="mini" style="margin-top:9px">Five height levels on both inner and outer surfaces, eight AE sensors per ring. Square microphones on separate top and bottom rim rings. Drag to rotate; excitation is simulated, not verified localization.</div></article>
+<article class="panel"><div class="title">Reactor condition assessment</div><div class="metric"><div class="small">Most recent PD-like acoustic event</div><div class="value" id="location">WAITING</div><div class="mini" id="confidence">Location is unverified; do not infer source position</div><div class="mini" id="rf-evidence" style="margin-top:6px">Waiting for classifier evidence</div><div class="mini" id="quality-evidence" style="margin-top:4px">No event diagnostics available</div></div><div class="bottom"><div class="metric"><div class="small">PD-like events (recent)</div><div class="value" id="pdcount">—</div></div><div class="metric"><div class="small">Sensors contributing</div><div class="value" id="uncount">—</div></div></div><div class="title" style="margin-top:8px">UV surface channels</div><div class="uv idle" id="uvinner">● UV-INNER — no coincident emission</div><div class="uv idle" id="uvouter">● UV-OUTER — no coincident emission</div><div class="title" style="margin-top:19px">Seven-day PD activity trend</div>
 <div class="mini">PD-like events per assumed monitoring hour · blue: demo history · dashed: reference</div>
 <div class="condition-chart" id="daily" aria-label="Seven-day PD-like event rate line chart"></div>
 <div class="condition-meta" id="baseline">Baseline: collecting data</div>
@@ -36,14 +36,61 @@ html,body{width:100%;height:100%;overflow:hidden}
 <div class="title" style="margin-top:13px">Latest PD-like acoustic waveform <span id="wave-sensor" style="color:#65c8ef;font-size:15px;margin-left:12px">SENSOR —</span></div>
 <div class="wave-panel"><svg id="waveform" viewBox="0 0 640 140" preserveAspectRatio="none" aria-label="Filtered acoustic transient waveform"></svg></div>
 <div class="chartlabel" id="wave-meta">Waiting for a PD-like acoustic transient · filtered signal</div></article>
-<article class="panel events"><div class="title">Time-stamped event log</div><div class="mini" style="margin-bottom:8px">UTC · classification · suspected air gap / sector · sensors triggered</div><div class="event-list" id="events"></div></article></section>
+<article class="panel events"><div class="title">PD activity and maintenance log</div><div class="mini" style="margin-bottom:8px">Actionable PD-like events only · all candidates retained in SQLite</div><div class="event-list" id="events"></div></article></section>
 <footer class="footer"><div><strong style="color:#f3c077">ENGINEERING STATUS:</strong> <span id="advisory">Loading synthetic observations…</span></div><div style="white-space:nowrap;color:#9bb7c9">No field validation · no IEC certification</div></footer></main></div>
 <script>
-const svg=document.getElementById('reactor');const NS='http://www.w3.org/2000/svg';const cx=250,cy=250,radii=[77,117,157,197];let latest=null;
+const svg=document.getElementById('reactor');const NS='http://www.w3.org/2000/svg';let latest=null;
 function node(tag,attrs,parent=svg){const el=document.createElementNS(NS,tag);Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v));parent.appendChild(el);return el}
-function polar(r,a){return [cx+r*Math.cos(a),cy-r*Math.sin(a)]}
-function wedge(r1,r2,sector){const a=sector*Math.PI/2,b=a+Math.PI/2;const p1=polar(r1,a),p2=polar(r2,a),p3=polar(r2,b),p4=polar(r1,b);return `M${p1} L${p2} A${r2},${r2} 0 0 0 ${p3} L${p4} A${r1},${r1} 0 0 1 ${p1} Z`}
-function draw(){svg.innerHTML='';node('circle',{cx,cy,r:219,fill:'#0a1a29',stroke:'#263f53','stroke-width':2});for(let g=0;g<4;g++){for(let s=0;s<4;s++){const active=latest&&latest.gap===g+1&&latest.sector===s+1;node('path',{d:wedge(radii[g]-16,radii[g]+16,s),fill:active?'#b66a2b':'#18334a',opacity:active?.88:.5,stroke:'#3c6079','stroke-width':1})}}for(let r of radii)node('circle',{cx,cy,r,fill:'none',stroke:'#648aa4','stroke-width':1.4,'stroke-dasharray':'3 7',opacity:.6});for(let s=0;s<4;s++){let p=polar(224,s*Math.PI/2+Math.PI/4);const label=node('text',{x:p[0],y:p[1],fill:'#c2d9e9','text-anchor':'middle','font-size':13,'font-weight':700});label.textContent='S'+(s+1)}for(let g=0;g<4;g++){let p=polar(radii[g],Math.PI*.75);const t=node('text',{x:p[0],y:p[1]-7,fill:'#d3e3ee','font-size':10,'text-anchor':'middle'});t.textContent='G'+(g+1)}for(let g=0;g<4;g++)for(let s=0;s<4;s++){const i=g*4+s;const a=s*Math.PI/2;const p=polar(radii[g],a);const amp=latest?.amplitudes?.[i]||0;const max=Math.max(...(latest?.amplitudes||[0]),.001);const strength=amp/max;const detected=latest?.detected?.[i];const col=detected?(strength>.65?'#ffc065':strength>.3?'#e29a4e':'#51c4f0'):'#476d86';node('circle',{cx:p[0],cy:p[1],r:detected?6+strength*10:6,fill:col,stroke:detected?'#f5e2b4':'#91a6b5','stroke-width':1.4,opacity:detected?1:.55});const title=node('title',{});title.textContent=`AE-G${g+1}-S${s+1}: ${amp.toFixed(4)} relative units`;}node('circle',{cx,cy,r:42,fill:'#0c1d2e',stroke:'#55778e','stroke-width':1.5});const center=node('text',{x:cx,y:cy-2,'text-anchor':'middle',fill:'#a9c8dc','font-size':14,'font-weight':750});center.textContent='AIR CORE';const sub=node('text',{x:cx,y:cy+17,'text-anchor':'middle',fill:'#7297b1','font-size':10});sub.textContent='16 AE NODES'}
+function txt(x,y,value,size=13,color='#b9d4e5',anchor='start',weight='500'){const t=node('text',{x,y,fill:color,'font-size':size,'font-weight':weight,'text-anchor':anchor});t.textContent=value;return t}
+let viewAngle=0.52;
+function point(r,a,z){const t=a+viewAngle;return {x:250+r*Math.cos(t),y:280+0.31*r*Math.sin(t)-z,depth:Math.sin(t)};}
+function ringPath(r,z){let d='';for(let i=0;i<=100;i++){const q=point(r,i*2*Math.PI/100,z);d+=(i?'L':'M')+q.x.toFixed(2)+','+q.y.toFixed(2);}return d+'Z';}
+function lineRing(r,z,color,opacity=0.65){node('path',{d:ringPath(r,z),fill:'none',stroke:color,'stroke-width':1.15,opacity});}
+function draw(){
+ svg.replaceChildren();svg.setAttribute('viewBox','0 0 500 500');
+ const Ro=158,Ri=100,top=126,bottom=-76;
+ const ae=latest?.amplitudes||Array(80).fill(0),det=latest?.detected||Array(80).fill(false);
+ const mic=latest?.evidence?.mic_amplitudes||Array(16).fill(0),md=latest?.evidence?.mic_detected||Array(16).fill(false);
+ const peakAE=Math.max(0.0001,...ae),peakMIC=Math.max(0.0001,...mic);
+ // The shell is translucent, so the back-side rings remain visible without looking like extra winding layers.
+ const topOuter=ringPath(Ro,top),topInner=ringPath(Ri,top);
+ node('path',{d:topOuter+' '+topInner,fill:'#6b9ab9','fill-opacity':'.24','fill-rule':'evenodd'});
+ const leftTop=point(Ro,Math.PI,top),rightTop=point(Ro,0,top),leftBottom=point(Ro,Math.PI,bottom),rightBottom=point(Ro,0,bottom);
+ node('path',{d:`M${leftTop.x},${leftTop.y} L${leftBottom.x},${leftBottom.y} A${Ro},${Ro*.31} 0 0 0 ${rightBottom.x},${rightBottom.y} L${rightTop.x},${rightTop.y} Z`,fill:'#557c98','fill-opacity':'.18'});
+ for(let k=0;k<5;k++){const z=bottom+k*(top-bottom)/4;lineRing(Ro,z,'#92b8d1',.57);lineRing(Ri,z,'#6fc4b5',.67);}
+ lineRing(Ro,top,'#a9c6da',.9);lineRing(Ri,top,'#91d2c6',.9);lineRing(Ro,bottom,'#86a6bf',.8);lineRing(Ri,bottom,'#72b9ad',.6);
+ for(const r of [Ro,Ri])for(const a of [0,Math.PI]){const q=point(r,a,top),w=point(r,a,bottom);node('line',{x1:q.x,y1:q.y,x2:w.x,y2:w.y,stroke:'#82abc3','stroke-width':1,opacity:.48});}
+ // Microphones are shown on separate rings just outside the two rims, not inside the winding.
+ lineRing(Ro+12,top+7,'#61d8f2',.92);lineRing(Ro+12,bottom-7,'#61d8f2',.92);
+ const items=[];
+ for(let surface=0;surface<2;surface++)for(let k=0;k<5;k++)for(let a=0;a<8;a++){
+  const idx=surface*40+k*8+a;const q=point(surface===0?Ri:Ro,a*Math.PI/4,bottom+k*(top-bottom)/4);
+  items.push({q,id:`AE-${surface===0?'IN':'OUT'}-Z${k+1}-A${a+1}`,mic:false,am:ae[idx]||0,on:!!det[idx],peak:peakAE});
+ }
+ for(let k=0;k<2;k++)for(let a=0;a<8;a++){
+  const idx=k*8+a,q=point(Ro+12,a*Math.PI/4,k===0?bottom-7:top+7);
+  items.push({q,id:`MIC-Z${k+1}-A${a+1}`,mic:true,am:mic[idx]||0,on:!!md[idx],peak:peakMIC});
+ }
+ items.sort((a,b)=>a.q.depth-b.q.depth);
+ for(const item of items){const {q,mic,on,am,peak}=item;const hot=on&&am/peak>.22;
+  const fill=hot?'#ff775e':mic?'#62d9f4':'#ffc075',opacity=q.depth<0?.52:1;
+  let shape=mic?node('rect',{x:q.x-4.6,y:q.y-4.6,width:9.2,height:9.2,rx:1,fill,stroke:'#0b1929','stroke-width':1,opacity}):node('circle',{cx:q.x,cy:q.y,r:4.7,fill,stroke:'#0b1929','stroke-width':1,opacity});
+  const title=node('title',{},shape);title.textContent=`${item.id} · relative response ${am.toFixed(4)}`;
+  if(hot)node('circle',{cx:q.x,cy:q.y,r:9,fill:'none',stroke:'#ff775e','stroke-width':1.4,opacity:.8});
+ }
+ txt(250,23,'8 azimuths × 5 AE levels · ID + OD',13,'#c6ddec','middle','700');
+ txt(250,42,'2 microphone rim rings · 8 nodes each',11,'#8eb3ca','middle');
+ txt(20,112,'INNER (ID)',11,'#79d1bb');node('line',{x1:95,y1:113,x2:165,y2:156,stroke:'#79d1bb',opacity:.7});
+ txt(394,125,'OUTER (OD)',11,'#ffc075');node('line',{x1:394,y1:129,x2:365,y2:167,stroke:'#ffc075',opacity:.7});
+ txt(380,66,'TOP MIC',10,'#62d9f4');node('line',{x1:382,y1:70,x2:354,y2:110,stroke:'#62d9f4',opacity:.7});
+ txt(370,450,'BOTTOM MIC',10,'#62d9f4');node('line',{x1:374,y1:436,x2:356,y2:403,stroke:'#62d9f4',opacity:.7});
+ txt(250,485,'Drag horizontally to rotate · schematic not to scale',10,'#89a9bf','middle');
+}
+let drag=false,lastX=0;
+svg.style.touchAction='pan-y';
+svg.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;svg.setPointerCapture(e.pointerId)});
+svg.addEventListener('pointermove',e=>{if(!drag)return;viewAngle+=(e.clientX-lastX)*.008;lastX=e.clientX;draw()});
+svg.addEventListener('pointerup',()=>drag=false);svg.addEventListener('pointercancel',()=>drag=false);
 function bars(id,arr,key){const host=document.getElementById(id);host.innerHTML='';const max=Math.max(1,...arr.map(x=>x[key]||0));for(const x of arr){const col=document.createElement('div');col.className='barcol';col.title=`${x.label}: ${x[key]}`;const bar=document.createElement('div');bar.className='bar'+(key==='peak'?' orange':'');bar.style.height=`${Math.max(2,100*(x[key]||0)/max)}%`;col.appendChild(bar);host.appendChild(col)}}
 function uv(id,active){const e=document.getElementById(id);e.className='uv '+(active?'active':'idle');e.textContent=(active?'● ':'○ ')+(id==='uvinner'?'UV-INNER':'UV-OUTER')+' — '+(active?'coincident optical emission':'no coincident emission')}
 function svgEl(parent,tag,attrs){const e=document.createElementNS(NS,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);parent.appendChild(e);return e}
@@ -71,7 +118,31 @@ function drawWave(w){const host=document.getElementById('waveform');host.innerHT
 }
 let lastWaveUid=null;
 async function updateWave(){try{const r=await fetch('/api/waveform',{cache:'no-store'});if(!r.ok)throw Error('waveform unavailable');const w=await r.json();if(w.event_uid!==lastWaveUid){drawWave(w);lastWaveUid=w.event_uid||null}}catch(e){document.getElementById('wave-meta').textContent='Waveform stream unavailable'}}
-async function update(){try{const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();latest=data.latest;document.getElementById('clock').textContent=data.time_quality;document.getElementById('network').textContent=data.network_status;document.getElementById('pdcount').textContent=data.stats.pd;document.getElementById('uncount').textContent=data.stats.uncertain;document.getElementById('advisory').textContent=data.advisory;document.getElementById('location').textContent=latest?.gap?`GAP ${latest.gap} / SECTOR ${latest.sector}`:'LOCATION UNRESOLVED';document.getElementById('confidence').textContent=latest?.gap?`Response-pattern margin: ${latest.location_score.toFixed(3)} (not a probability) · ${latest.sensor_count} sensors · ${latest.timestamp.substring(11,19)} UTC`:`${latest?.sensor_count||0} sensors · insufficient localization confidence`;uv('uvinner',latest?.uv_inner);uv('uvouter',latest?.uv_outer);draw();dailyChart(data.condition);updateWave();document.getElementById('events').innerHTML=data.events.map(e=>{const loc=e.gap?`Gap ${e.gap} · Sector ${e.sector}`:'Location unresolved';const tag=e.classification==='PD-like'?'pd':e.classification==='Uncertain'?'unc':'';return `<div class="event"><div class="time">${e.timestamp.substring(11,23)}</div><div><div class="kind">${e.classification}</div><div class="loc">${loc} · ${e.sensor_count} AE sensors</div></div><span class="tag ${tag}">${e.uv_inner||e.uv_outer?'UV + AE':'AE'}</span></div>`}).join('')}catch(e){document.getElementById('advisory').textContent='Data connection unavailable: '+e.message}}function fitCanvas(){const stage=document.querySelector('.shell');const scale=Math.min(window.innerWidth/1920,window.innerHeight/1080);
+async function update(){
+ try{
+  const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);
+  const data=await r.json();latest=data.latest;
+  document.getElementById('clock').textContent=data.time_quality;
+  document.getElementById('network').textContent=data.network_status;
+  document.getElementById('pdcount').textContent=data.stats.pd;
+  document.getElementById('uncount').textContent=latest?.sensor_count??0;
+  document.getElementById('advisory').textContent=data.advisory;
+  const ev=latest?.evidence||{};
+  document.getElementById('rf-evidence').textContent=ev.rf_scores?Object.entries(ev.rf_scores).map(([k,v])=>`${k.toUpperCase()} RF score ${Number(v).toFixed(2)}`).join(' · '):'Awaiting acoustic classifier evidence';
+  document.getElementById('quality-evidence').textContent=latest?`AE ${ev.sensor_ids?.filter(x=>x.startsWith('AE-')).length||0} · microphones ${ev.sensor_ids?.filter(x=>x.startsWith('MIC-')).length||0} · signal quality ${ev.quality_ok?'pass':'review'}`:'No PD-like event';
+  document.getElementById('location').textContent=latest?'PD-LIKE ACTIVITY':'MONITORING';
+  document.getElementById('confidence').textContent=latest?`Source location not verified · ${latest.timestamp.substring(11,19)} UTC`:'Awaiting acoustic events';
+  uv('uvinner',latest?.uv_inner);uv('uvouter',latest?.uv_outer);
+  draw();dailyChart(data.condition);updateWave();
+  const pdEvents=data.events.filter(e=>e.classification==='PD-like');
+  document.getElementById('events').innerHTML=pdEvents.map(e=>{
+   const modes=(e.evidence?.modalities||['ae']).join('+').toUpperCase();
+   const score=e.pd_score==null?'':` · RF evidence ${Number(e.pd_score).toFixed(2)}`;
+   return `<div class="event"><div class="time">${e.timestamp.substring(11,19)}</div><div><div class="kind">Likely PD activity</div><div class="loc">${modes} · ${e.sensor_count} responding sensors${score} · location unverified</div></div><span class="tag pd">${modes}</span></div>`;
+  }).join('')||'<div class="mini">No PD-like events recorded yet</div>';
+ }catch(e){document.getElementById('advisory').textContent='Dashboard update error: '+e.message}
+}
+function fitCanvas(){const stage=document.querySelector('.shell');const scale=Math.min(window.innerWidth/1920,window.innerHeight/1080);
  stage.style.transform=`translate(${Math.max(0,(window.innerWidth-1920*scale)/2)}px,${Math.max(0,(window.innerHeight-1080*scale)/2)}px) scale(${scale})`;}
 window.addEventListener('resize',fitCanvas);fitCanvas();draw();drawWave(null);update();setInterval(update,1000);
 </script></body></html>
